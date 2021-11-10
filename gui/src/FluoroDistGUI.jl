@@ -27,7 +27,10 @@ function gui()
     b = push_labeled!(slider(1:100), "Second axis")
     angle = push_labeled!(slider(0.0:0.01:2π), "Angle")
     psf_sigma = push_labeled!(slider(0.0:0.1:8.0), "PSF sigma")
-    distance = push_labeled!(slider(0.0:0.1:8.0), "Distance")
+    distance = push_labeled!(slider(0.0:0.1:16.0), "Distance")
+    width = push_labeled!(slider(0.0:0.1:20.0), "Membrane Width")
+    primary_length = push_labeled!(slider(0.0:0.1:20.0), "Ligand Length")
+    secondary_length = push_labeled!(slider(0.0:0.1:20.0), "Ligand Length")
     transform_dd = dropdown(keys(transform_dict))
     transform = map(transform_dd) do t
         x -> transform_dict[t](x)
@@ -36,11 +39,17 @@ function gui()
     nsamp_full = map(nsamp) do n
         2^n
     end
-    c = canvas(800,800)
-    redraw = draw(c, a, b, nsamp_full, transform, angle, psf_sigma, distance) do cnvs, a, b, nsamp, t_transform, angoff, psf_sigma, d
+    
+    img = map(a, b, nsamp_full, transform, angle, psf_sigma, distance, width, primary_length, secondary_length) do a, b, nsamp, t_transform, angoff, psf_sigma, d, width, primary_length, secondary_length
         Random.seed!(1)
-        img = to_image_stack(ellipse(a,b; angoff); n_stack=1, nsamp, t_transform, psf_sigma, d)
-        copy!(cnvs, colorview(RGB, img[:,:,1], img[:,:,2], img[:,:,2]))
+        to_image_stack(ellipse(a,b; angoff); n_stack=1, nsamp, t_transform, psf_sigma, d, width, primary_length, secondary_length, pos_jiggle=0)
+    end
+
+    c = canvas(800,800)
+    redraw = draw(c, img) do cnvs, img
+        memb = @view img[:,:,1]
+        target = @view img[:,:,2]
+        copy!(cnvs, colorview(RGB, memb, target, target))
     end
     push!(bx, transform_dd)
     push!(bx, c)

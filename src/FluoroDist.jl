@@ -26,11 +26,12 @@ end
 curry_get(ind) = x -> x[ind]
 components(svec) = (map(curry_get(1), svec), map(curry_get(2), svec))
 
-function simulate_fluoresence(t, cx, cy, f, df, nsamp, d, psf_sigma)
+function simulate_fluoresence(postprocess, t, cx, cy, f, df, nsamp, d, psf_sigma)
     ts = sample(t, nsamp)
     x, y = components(f.(ts))
     dx, dy = components(@. normalize(df(ts)))
-    psf_sigma*randn(nsamp) .+ x .+ cx .- dy*d, psf_sigma*randn(nsamp) .+ y .+ cy .+ dx*d
+    v = psf_sigma*randn(nsamp, 2) .+ postprocess(hcat(x .+ cx .- dy.*d, y .+ cy .+ dx.*d))
+    @view(v[:,1]), @view(v[:,2])
 end
 
 function create_patch_transformer(spaces, space_factor)
@@ -97,9 +98,13 @@ function shape_from_points(points_x, points_y)
     f ∘ t, df ∘ t
 end
 
-function to_image_stack(shape; d=2.0, nsamp=100000, t_transform=identity, naturalize_t=true, n_stack=20, psf_sigma=4, n_t=1000)
+function sample_circle(n)
+    ang = rand(n,2)*2pi
+    hcat(cos.(ang[:,1]).*sin.(ang[:,2]), sin.(ang[:,1]).*sin.(ang[:,2]))
+end
+
+function to_image_stack(shape; d=2.0, nsamp=100000, t_transform=identity, naturalize_t=true, n_stack=20, psf_sigma=4, n_t=1000, width=0, primary_length=0, secondary_length=0, pos_jiggle = 40)
     f, df = shape
-    pos_jiggle = 40
     p = 40
     
     magdf(theta) = hypot(df(theta)...)
@@ -111,16 +116,21 @@ function to_image_stack(shape; d=2.0, nsamp=100000, t_transform=identity, natura
     cx, cy = 1 .+ p .+ w .+ pos_jiggle*rand(2) .- pos_jiggle/2
     
     mapreduce((x,y) -> cat(x, y, dims=3), 1:n_stack) do i
-        xs, ys = simulate_fluoresence(t, cx, cy, f, df, nsamp, 0, psf_sigma)
-        xds, yds = simulate_fluoresence(t_transform(t), cx, cy, f, df, nsamp, d, psf_sigma)
-        
-        inner = zeros(2p+2w+1,2p+2w+1)
-        outer = copy(inner)
-        for (x,y,xd,yd) in zip(xs,ys,xds,yds)
-            inner[round(Int,x), round(Int,y)] += 1.0
-            outer[round(Int,xd), round(Int,yd)] += 1.0
+        xs, ys = simulate_fluoresence(identity, t, cx, cy, f, df, nsamp, (rand(nsamp).-0.5)*width, psf_sigma)
+        xds, yds = simulate_fluoresence(t_transform(t), cx, cy, f, df, nsamp, d, psf_sigma) do mat
+            mat .+= sample_circle(nsamp)*primary_length
+            mat .+= sample_circle(nsamp)*secondary_length
+            mat
         end
-        Gray.(imadjustintensity(cat(inner,outer,dims=3)))
+        
+        img = zeros(2p+2w+1,2p+2w+1,2)
+        for (x,y,xd,yd) in zip(xs,ys,xds,yds)
+            img[round(Int,x), round(Int,y), 1] += 1.0
+            img[round(Int,xd), round(Int,yd), 2] += 1.0
+        end
+        img[:,:,1] ./= maximum(img[:,:,1])
+        img[:,:,2] ./= maximum(img[:,:,2])
+        img
     end
 end
 
